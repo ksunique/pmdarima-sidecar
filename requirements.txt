@@ -5,3 +5,4 @@ python-multipart==0.0.9
 pandas==1.5.3
 pydantic==1.10.13        # if using explicit BaseModel typing
 joblib==1.3.2            # if used for model persistence
+botocore>=1.34.0
