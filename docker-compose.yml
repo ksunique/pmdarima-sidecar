@@ -4,7 +4,7 @@ services:
   main-app:
     build:
       context: .
-      dockerfile: Dockerfile  # your existing Python 3.11 Dockerfile
+      dockerfile: Dockerfile  # your Python 3.11 Dockerfile
     container_name: main_app
     ports:
       - "5000:5000"
@@ -13,18 +13,18 @@ services:
     environment:
       - ARIMA_SIDECAR_URL=http://arima-sidecar:8000
     networks:
-      - app-network
+      - trading_net
 
   arima-sidecar:
     build:
       context: .
-      dockerfile: Dockerfile.pmdarima
+      dockerfile: Dockerfile.arima
     container_name: arima_sidecar
     ports:
       - "8000:8000"
     networks:
-      - app-network
+      - trading_net
 
 networks:
-  app-network:
+  trading_net:
     driver: bridge
