@@ -3,6 +3,9 @@ import time
 import logging
 from typing import Optional, Tuple, List, Any
 
+from fastapi import APIRouter
+from pmdarima_service import predict_auto_arima
+
 # Configure logging
 logger = logging.getLogger("arima_sidecar")
 logger.setLevel(logging.INFO)
@@ -23,7 +26,7 @@ def train_and_predict_arima(
     retries: int = 3,
     backoff_factor: float = 1.5,
     timeout: int = 30,
-    endpoint_url: str = "http://localhost:8000/predict-auto-arima"
+    endpoint_url: str = "http://localhost:8000/predict_auto_arima"
 ) -> Tuple[Optional[Any], Optional[List[float]], Optional[float]]:
     """
     Call ARIMA sidecar FastAPI endpoint to train or predict.
