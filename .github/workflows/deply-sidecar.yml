@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+  arima-sidecar:
+    container_name: arima-sidecar
+    build:
+      context: .
+      dockerfile: Dockerfile.pmdarima
+    ports:
+      - "8000:8000"  # Expose externally only if needed
+    environment:
+      - PYTHONUNBUFFERED=1
+      - AWS_REGION=us-east-1   # Update to match your S3 region
+      - BUCKET_NAME=your-s3-bucket-name
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - trading_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  trading_net:
+    external: true  # Or set to `false` and define here if not already created
