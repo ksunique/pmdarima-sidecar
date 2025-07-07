@@ -64,7 +64,7 @@ def store_model_to_s3(model, market, ticker, model_type, bucket_name, file_ext="
 # -------------------------
 # Core Endpoint
 # -------------------------
-@app.post("/train-and-predict", response_model=ArimaResponse)
+@app.post("/predict_auto_arima", response_model=ArimaResponse)
 def predict_auto_arima(req: ArimaRequest):
     try:
         close_prices = np.asarray(req.close_prices, dtype=np.float64)
