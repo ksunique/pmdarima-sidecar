@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile  # your Python 3.11 Dockerfile
-    container_name: main_app
+    container_name: trading_ml
     ports:
       - "5000:5000"
     depends_on:
@@ -18,7 +18,7 @@ services:
   arima-sidecar:
     build:
       context: .
-      dockerfile: Dockerfile.arima
+      dockerfile: Dockerfile.pmdarima
     container_name: arima_sidecar
     ports:
       - "8000:8000"
