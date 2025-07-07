@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  main-app:
+    build:
+      context: .
+      dockerfile: Dockerfile  # your existing Python 3.11 Dockerfile
+    container_name: main_app
+    ports:
+      - "5000:5000"
+    depends_on:
+      - arima-sidecar
+    environment:
+      - ARIMA_SIDECAR_URL=http://arima-sidecar:8000
+    networks:
+      - app-network
+
+  arima-sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile.pmdarima
+    container_name: arima_sidecar
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
