@@ -9,6 +9,8 @@ import joblib
 import tempfile
 import os
 
+print("NumPy version:", np.__version__)
+
 # Initialize logger and app
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
