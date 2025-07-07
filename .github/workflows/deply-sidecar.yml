@@ -1,32 +1,68 @@
-version: '3.9'
+name: 🚀 Deploy ARIMA Sidecar
 
-services:
-  arima-sidecar:
-    container_name: arima-sidecar
-    build:
-      context: .
-      dockerfile: Dockerfile.pmdarima
-    image: "${ECR_URI:-ghcr.io}/arima-sidecar:${IMAGE_TAG:-latest}"
-    restart: unless-stopped
-    ports:
-      - "8000:8000"  # Optional: expose externally only if needed
-    environment:
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      BUCKET_NAME: ${BUCKET_NAME}
-      LOG_LEVEL: "info"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - trading_net
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag (e.g. latest, v1.0.0)'
+        required: true
+        default: 'latest'
 
-networks:
-  trading_net:
-    external: true  # Must be pre-created or handled in your infra setup
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      ECR_URI: ${{ secrets.ECR_REPO }}
+
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v3
+
+      - name: 🔐 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: 🔐 Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: 🏗️ Build and Push Docker Image to ECR
+        run: |
+          IMAGE_TAG=${{ github.event.inputs.image_tag }}
+          docker build -f Dockerfile.pmdarima -t $ECR_URI:arima-sidecar-$IMAGE_TAG .
+          docker push $ECR_URI:arima-sidecar-$IMAGE_TAG
+
+      - name: 🔐 Setup SSH to EC2
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 🚀 Deploy Sidecar to EC2
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<EOF
+          set -e
+
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          ECR_URI="${{ secrets.ECR_REPO }}"
+          FULL_TAG="\$ECR_URI:arima-sidecar-\$IMAGE_TAG"
+          APP_DIR="/home/ec2-user/arima-sidecar"
+
+          echo "📦 Pulling updated image: \$FULL_TAG"
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin \$ECR_URI
+          docker pull \$FULL_TAG
+
+          echo "🔧 Updating deployment"
+          mkdir -p \$APP_DIR
+          cd \$APP_DIR
+
+          echo "🐳 Running ARIMA sidecar container"
+          docker rm -f arima-sidecar || true
+          docker run -d --name arima-sidecar --network trading_net -p 8000:8000 \$FULL_TAG
+
+          echo "✅ Deployment complete"
+          EOF
