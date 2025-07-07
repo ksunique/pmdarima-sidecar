@@ -8,6 +8,7 @@ import boto3
 import joblib
 import tempfile
 import os
+import botocore.exceptions
 
 print("NumPy version:", np.__version__)
 
@@ -38,18 +39,21 @@ class ArimaResponse(BaseModel):
 # S3 Utilities (localized)
 # -------------------------
 def load_model_from_s3(market, ticker, model_type, bucket_name, file_ext="pkl"):
-    key = f"models/{market}/{ticker}/{model_type}.{file_ext}"
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        try:
-            s3.download_file(bucket_name, key, tmp_file.name)
-            model = joblib.load(tmp_file.name)
-            logger.info(f"✅ Loaded model from S3: {key}")
-            return model
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to load model from S3 ({key}): {e}")
-            return None
-        finally:
-            os.unlink(tmp_file.name)
+    key = f"market/{market}/{ticker}/{model_type}.{file_ext}"
+    try:
+        s3.download_file(bucket_name, key, "/tmp/model.pkl")
+        with open("/tmp/model.pkl", "rb") as f:
+            model = joblib.load(f)
+        return model
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == '404':
+            logger.info(f"📂 Model not found in S3: {key}")
+        else:
+            logger.error(f"❌ S3 error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Failed to load model from S3: {e}")
+        return None
 
 def store_model_to_s3(model, market, ticker, model_type, bucket_name, file_ext="pkl"):
     key = f"models/{market}/{ticker}/{model_type}.{file_ext}"
