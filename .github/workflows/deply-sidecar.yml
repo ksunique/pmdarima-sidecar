@@ -65,7 +65,6 @@ jobs:
           docker run -d --name arima-sidecar --network trading_net -p 8000:8000 \
           --memory="512m" \
           --cpus="0.5" \
-          --network trading_net \
           \$FULL_TAG
         
 
