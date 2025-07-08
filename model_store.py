@@ -5,8 +5,8 @@ import joblib
 import os
 import tempfile
 import numpy as np
-from tensorflow.keras.models import load_model  # type: ignore
-from tensorflow.keras.saving import load_model as load_keras_model  # for .keras support # type: ignore
+# from tensorflow.keras.models import load_model  # type: ignore
+# from tensorflow.keras.saving import load_model as load_keras_model  # for .keras support # type: ignore
 
 
 # def write_model_to_temp_file(model, file_ext: str):
