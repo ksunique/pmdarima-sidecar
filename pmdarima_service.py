@@ -102,7 +102,7 @@ def predict_auto_arima(req: ArimaRequest):
 
         # Save model if mode=train and it's better
         if req.mode == "train" and (req.best_val_loss is None or (val_loss is not None and val_loss < req.best_val_loss)):
-            store_model_to_s3(model, req.market, req.ticker, "auto-arima", req.bucket_name, file_ext: str = "pkl")
+            store_model_to_s3(model, req.market, req.ticker, "auto-arima", req.bucket_name, file_ext = "pkl")
 
         return ArimaResponse(
             model_exists=(model is not None),
