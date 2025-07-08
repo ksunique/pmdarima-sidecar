@@ -67,9 +67,13 @@ jobs:
           --cpus="0.5" \
           \$FULL_TAG
 
+      - name: Clean up unused Docker images
+        run: |
           echo "🧹 Pruning unused Docker objects to free up space"
           sleep 10
-          docker system prune -a --volumes -f
-        
+          docker container prune -f
+          docker image prune -a -f
+          docker volume prune -f
+    
           echo "✅ Deployment complete"
           EOF
