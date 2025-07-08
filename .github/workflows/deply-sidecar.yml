@@ -66,7 +66,10 @@ jobs:
           --memory="512m" \
           --cpus="0.5" \
           \$FULL_TAG
-        
 
+          echo "🧹 Pruning unused Docker objects to free up space"
+          sleep 10
+          docker system prune -a --volumes -f
+        
           echo "✅ Deployment complete"
           EOF
