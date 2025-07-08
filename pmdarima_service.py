@@ -77,7 +77,8 @@ def predict_auto_arima(req: ArimaRequest):
         close_prices = np.asarray(req.close_prices, dtype=np.float64)
         y_true = close_prices[req.actual_seq_length:]
 
-        model = load_model_from_s3(req.market, req.ticker, "auto-arima", req.bucket_name, file_ext: str = "pkl") if req.model_override else None
+        # ✅ CORRECT
+        model = load_model_from_s3(req.market, req.ticker, "auto-arima", req.bucket_name, file_ext="pkl") if req.model_override else None
 
         if model is None:
             model = auto_arima(
