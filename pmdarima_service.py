@@ -8,7 +8,7 @@ import boto3
 import joblib
 import tempfile
 import os
-import botocore.exceptions
+
 from model_store import store_model_to_s3, load_model_from_s3
 
 # Setup logger
@@ -46,9 +46,11 @@ def predict_auto_arima(req: ArimaRequest):
         close_prices = np.asarray(req.close_prices, dtype=np.float64)
         y_true = close_prices[req.actual_seq_length:]
 
+        # Load model if override enabled
+        model = None
         if req.model_override:
             logger.info(f"🔄 Model override enabled. Attempting to load existing ARIMA model for {req.ticker}")
-        model = load_model_from_s3(req.market, req.ticker, "auto-arima", req.bucket_name, file_ext="pkl") if req.model_override else None
+            model = load_model_from_s3(req.market, req.ticker, "auto-arima", req.bucket_name, file_ext="pkl")
 
         if model is None:
             logger.info(f"🧠 Training new ARIMA model for {req.ticker}")
@@ -65,12 +67,15 @@ def predict_auto_arima(req: ArimaRequest):
 
         try:
             preds = model.predict(n_periods=len(y_true))
-            val_loss = float(np.mean((y_true - preds) ** 2)) if len(y_true) == len(preds) else None
+            if len(preds) != len(y_true):
+                raise ValueError("Prediction and true value lengths do not match")
+            val_loss = float(np.mean((y_true - preds) ** 2))
             logger.info(f"📈 Prediction completed for {req.ticker}. MSE: {val_loss:.6f}")
         except Exception as e:
             logger.error(f"❌ Prediction failed for {req.ticker}: {e}")
             raise HTTPException(status_code=500, detail="ARIMA prediction failed")
 
+        # Save model conditionally
         if req.mode == "train":
             if req.best_val_loss is None:
                 logger.info(f"📤 Saving model for {req.ticker} (no prior val_loss available)")
@@ -82,7 +87,7 @@ def predict_auto_arima(req: ArimaRequest):
                 logger.info(f"⚖️ Existing model retained for {req.ticker} (val_loss={val_loss:.6f} >= best={req.best_val_loss})")
 
         return ArimaResponse(
-            model_exists=(model is not None),
+            model_exists=True,
             preds=preds.tolist(),
             val_loss=val_loss,
             status="success"
