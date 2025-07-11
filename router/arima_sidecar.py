@@ -31,7 +31,7 @@ def train_and_predict_arima(
     Call ARIMA sidecar FastAPI endpoint to train or predict.
 
     Returns:
-    - model (None as placeholder in 3.11 context),
+    - model (None as placeholder),
     - list of predictions,
     - validation loss (MSE)
     """
@@ -60,8 +60,8 @@ def train_and_predict_arima(
             predictions = data.get("preds")
             val_loss = data.get("val_loss")
 
-            if predictions is None or val_loss is None:
-                logger.error(f"❌ Incomplete response received for {ticker}: {data}")
+            if predictions is None or not isinstance(predictions, list):
+                logger.error(f"❌ Incomplete or invalid prediction response for {ticker}: {data}")
                 break
 
             logger.info(f"✅ ARIMA sidecar success for {ticker} | val_loss={val_loss:.6f}")
