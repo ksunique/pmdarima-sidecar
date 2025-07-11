@@ -44,6 +44,7 @@ def predict_auto_arima(req: ArimaRequest):
 
     try:
         close_prices = np.asarray(req.close_prices, dtype=np.float64)
+        logger.info(f"📊 ARIMA received {len(close_prices)} close prices for {req.ticker}")
         y_true = close_prices[req.actual_seq_length:]
 
         # Load model if override enabled
