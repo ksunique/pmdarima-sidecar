@@ -13,7 +13,6 @@ handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s"))
 logger.addHandler(handler)
 
-
 def train_and_predict_arima(
     close_prices: List[float],
     actual_seq_length: int,
@@ -48,36 +47,41 @@ def train_and_predict_arima(
         "mode": mode
     }
 
+    logger.info(f"📨 Starting ARIMA sidecar request for {ticker} | mode={mode} | override={model_override}")
+
     attempt = 0
     while attempt < retries:
         try:
-            logger.info(f"📡 Sidecar call attempt {attempt + 1} for {ticker} | mode={mode}")
+            logger.info(f"📡 Attempt {attempt + 1}/{retries} for {ticker}")
             response = requests.post(endpoint_url, json=payload, timeout=timeout)
             response.raise_for_status()
 
             data = response.json()
-            predictions = data.get("predictions")
+            predictions = data.get("preds")
             val_loss = data.get("val_loss")
 
             if predictions is None or val_loss is None:
-                raise ValueError(f"Sidecar returned incomplete data: {data}")
+                logger.error(f"❌ Incomplete response received for {ticker}: {data}")
+                break
 
-            logger.info(f"✅ Sidecar successful for {ticker} | val_loss={val_loss:.6f}")
+            logger.info(f"✅ ARIMA sidecar success for {ticker} | val_loss={val_loss:.6f}")
             return None, predictions, val_loss
 
+        except requests.Timeout:
+            logger.warning(f"⏱️ Timeout on attempt {attempt + 1} for {ticker}")
         except requests.RequestException as re:
-            logger.warning(f"⚠️ Sidecar request error on attempt {attempt + 1}: {re}")
+            logger.warning(f"⚠️ Request error on attempt {attempt + 1} for {ticker}: {re}")
         except ValueError as ve:
-            logger.error(f"❌ Invalid response: {ve}")
+            logger.error(f"❌ Response validation error for {ticker}: {ve}")
             break
         except Exception as e:
-            logger.error(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
+            logger.exception(f"🔥 Unexpected exception during sidecar call for {ticker}: {e}")
 
         attempt += 1
         if attempt < retries:
             sleep_time = backoff_factor ** attempt
-            logger.info(f"⏳ Retrying in {sleep_time:.1f}s...")
+            logger.info(f"⏳ Retrying after {sleep_time:.1f}s...")
             time.sleep(sleep_time)
 
-    logger.error(f"❌ Failed to get ARIMA predictions after {retries} attempts for {ticker}")
+    logger.error(f"❌ Failed to obtain ARIMA predictions for {ticker} after {retries} attempts")
     return None, None, None
