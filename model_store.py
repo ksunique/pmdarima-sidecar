@@ -5,6 +5,13 @@ import joblib
 import os
 import tempfile
 import numpy as np
+import logging
+
+logger = logging.getLogger("model_store")
+logging.basicConfig(level=logging.INFO)
+
+s3 = boto3.client("s3")
+
 # from tensorflow.keras.models import load_model  # type: ignore
 # from tensorflow.keras.saving import load_model as load_keras_model  # for .keras support # type: ignore
 
