@@ -6,88 +6,106 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 import numpy as np
-from datetime import datetime
-import pmdarima as pm  # type: ignore
-from sklearn.metrics import mean_squared_error
+from pmdarima import auto_arima
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
+import boto3
+import joblib
+import tempfile
+import os
+from statsmodels.tsa.stattools import adfuller
 
 from models.model_store import store_model_to_s3, load_model_from_s3
-from store.postgres_store import PostgresWriter
-from store.postgres_retrieve import PostgresRetriever
 
-def train_auto_arima_model(close_prices, actual_seq_length, market, ticker, bucket_name):
-    """
-    Train or reuse an auto_arima model on closing prices.
-    Returns:
-    - arima_preds: forecast list
-    """
+logger.info("✅ pmdarima_service.py loaded. NumPy version: %s", np.__version__)
+
+app = FastAPI()
+s3 = boto3.client("s3")
+
+class ArimaRequest(BaseModel):
+    close_prices: List[float]
+    actual_seq_length: int
+    market: str
+    ticker: str
+    bucket_name: str
+    model_override: bool = False
+    best_val_loss: Optional[float] = None
+    mode: str
+
+class ArimaResponse(BaseModel):
+    model_exists: bool
+    preds: List[float]
+    val_loss: Optional[float] = None
+    status: str
+
+@app.post("/predict_auto_arima", response_model=ArimaResponse)
+def predict_auto_arima(req: ArimaRequest):
+    logger.info(f"🚀 Received ARIMA request for {req.ticker} (mode={req.mode}, override={req.model_override})")
+
     try:
-        logger.info(f"🔧 Preparing data for auto_arima training for {ticker}...")
+        close_prices = np.asarray(req.close_prices, dtype=np.float64)
+        logger.info(f"📊 ARIMA received {len(close_prices)} close prices for {req.ticker}")
+        y_true = close_prices[req.actual_seq_length:]
 
-        close_prices = np.asarray(close_prices, dtype=np.float64)
-        y_true = close_prices[actual_seq_length:]
+        # Stationarity check
+        result = adfuller(close_prices)
+        if result[1] > 0.05:
+            logger.info(f"Non-stationary data detected for {req.ticker}. Applying differencing.")
+            close_prices = np.diff(close_prices)
+            y_true = y_true[1:]
 
-        if len(close_prices) < 100:
-            logger.error(f"❌ {ticker} - Insufficient data: only {len(close_prices)} rows. Skipping.")
-            return []
+        model = None
+        if req.model_override:
+            logger.info(f"🔄 Model override enabled. Attempting to load existing ARIMA model for {req.ticker}")
+            model = load_model_from_s3(req.market, req.ticker, "auto-arima", req.bucket_name, file_ext="pkl")
+
+        if model is None:
+            logger.info(f"🧠 Training new ARIMA model for {req.ticker}")
+            # Suppress scikit-learn deprecation warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=FutureWarning)
+                model = auto_arima(
+                    close_prices,
+                    seasonal=True,
+                    m=5,
+                    stepwise=True,
+                    suppress_warnings=True,
+                    error_action="ignore",
+                    ensure_all_finite=True
+                )
+            logger.info(f"✅ Successfully trained new ARIMA model for {req.ticker}")
+        else:
+            logger.info(f"📦 Loaded existing ARIMA model for {req.ticker}")
 
         try:
-            existing_model = load_model_from_s3(market, ticker, "arima", bucket_name, file_ext="pkl")
-            if existing_model:
-                logger.info(f"✅ Loaded cached ARIMA model for {ticker}")
-                n_future = len(close_prices) - actual_seq_length
-                forecast = existing_model.predict(n_periods=n_future)
-                return forecast.tolist()
+            preds = model.predict(n_periods=len(y_true))
+            if len(preds) != len(y_true):
+                logger.warning(f"Prediction length ({len(preds)}) does not match y_true ({len(y_true)}) for {req.ticker}")
+                raise ValueError("Prediction and true value lengths do not match")
+            val_loss = float(np.mean((y_true - preds) ** 2))
+            logger.info(f"📈 Prediction completed for {req.ticker}. MSE: {val_loss:.6f}")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to use existing ARIMA model for {ticker}: {e}")
+            logger.error(f"❌ Prediction failed for {req.ticker}: {e}")
+            raise HTTPException(status_code=500, detail="ARIMA prediction failed")
 
-        logger.info(f"🧠 Training new ARIMA model for {ticker}...")
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            model = pm.auto_arima(
-                close_prices,
-                start_p=0, start_q=0,
-                max_p=5, max_q=5,
-                m=1,
-                start_P=0, seasonal=False,
-                d=1, D=1, trace=False,
-                error_action='ignore',
-                suppress_warnings=True,
-                stepwise=True
-            )
+        if req.mode == "train":
+            if req.best_val_loss is None:
+                logger.info(f"📤 Saving model for {req.ticker} (no prior val_loss available)")
+                store_model_to_s3(model, req.market, req.ticker, "auto-arima", req.bucket_name, file_ext="pkl")
+            elif val_loss is not None and val_loss < req.best_val_loss:
+                logger.info(f"📤 Saving improved model for {req.ticker} (new val_loss={val_loss:.6f} < best={req.best_val_loss:.6f})")
+                store_model_to_s3(model, req.market, req.ticker, "auto-arima", req.bucket_name, file_ext="pkl")
+            else:
+                logger.info(f"⚖️ Existing model retained for {req.ticker} (val_loss={val_loss:.6f} >= best={req.best_val_loss})")
 
-        n_future = len(close_prices) - actual_seq_length
-        forecast = model.predict(n_periods=n_future)
-        arima_preds = forecast.tolist()
+        return ArimaResponse(
+            model_exists=True,
+            preds=preds.tolist(),
+            val_loss=val_loss,
+            status="success"
+        )
 
-        candidate_val_loss = mean_squared_error(y_true[-len(arima_preds):], arima_preds)
-        logger.info(f"📈 Prediction completed for {ticker}. MSE: {candidate_val_loss:.6f}")
-
-        retriever = PostgresRetriever()
-        writer = PostgresWriter()
-        best_val_loss = None
-
-        meta_df = retriever.fetch_recent_model_metadata(market, ticker, "arima", limit=1)
-        if not meta_df.empty:
-            best_val_loss = meta_df.iloc[0]["val_loss"]
-            logger.info(f"📄 Previous ARIMA MSE from metadata: {best_val_loss:.6f}")
-
-        if best_val_loss is None or candidate_val_loss < best_val_loss:
-            logger.info(f"📈 New ARIMA model outperforms previous. Saving to S3 and Postgres...")
-            store_model_to_s3(model, market, ticker, "arima", bucket_name, file_ext="pkl")
-            writer.write_model_metadata([{
-                "market": market,
-                "symbol": ticker,
-                "model_type": "arima",
-                "file_ext": "pkl",
-                "val_loss": float(candidate_val_loss),
-                "epochs_trained": 0,
-                "created_at": datetime.utcnow()
-            }])
-        else:
-            logger.info(f"⚖️ Existing model retained for {ticker} (val_loss={candidate_val_loss:.6f} >= best={best_val_loss:.6f})")
-
-        return arima_preds
-
-    except Exception as e:
-        logger.exception(f"❌ Failed to train ARIMA model for {ticker}: {e}")
-        return []
+    except Exception as ex:
+        logger.exception(f"❌ Unhandled exception in ARIMA endpoint for {req.ticker}: {ex}")
+        raise HTTPException(status_code=500, detail="Unhandled exception during ARIMA processing")
