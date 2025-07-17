@@ -2,6 +2,8 @@
 
 import logging
 import warnings
+import sys
+import os
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -13,10 +15,15 @@ from typing import List, Optional
 import boto3
 import joblib
 import tempfile
-import os
 from statsmodels.tsa.stattools import adfuller
 
-from model_store import store_model_to_s3, load_model_from_s3
+try:
+    from model_store import store_model_to_s3, load_model_from_s3
+except ModuleNotFoundError as e:
+    logger.error(f"❌ Failed to import model_store: {e}")
+    logger.info(f"Current PYTHONPATH: {sys.path}")
+    logger.info(f"Current directory contents: {os.listdir('/app')}")
+    raise
 
 logger.info("✅ pmdarima_service.py loaded. NumPy version: %s", np.__version__)
 
@@ -62,7 +69,6 @@ def predict_auto_arima(req: ArimaRequest):
 
         if model is None:
             logger.info(f"🧠 Training new ARIMA model for {req.ticker}")
-            # Suppress scikit-learn deprecation warnings
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=FutureWarning)
                 model = auto_arima(
@@ -71,8 +77,7 @@ def predict_auto_arima(req: ArimaRequest):
                     m=5,
                     stepwise=True,
                     suppress_warnings=True,
-                    error_action="ignore",
-                    ensure_all_finite=True
+                    error_action="ignore"
                 )
             logger.info(f"✅ Successfully trained new ARIMA model for {req.ticker}")
         else:
@@ -83,8 +88,12 @@ def predict_auto_arima(req: ArimaRequest):
             if len(preds) != len(y_true):
                 logger.warning(f"Prediction length ({len(preds)}) does not match y_true ({len(y_true)}) for {req.ticker}")
                 raise ValueError("Prediction and true value lengths do not match")
+            if np.any(np.isnan(preds)):
+                logger.error(f"❌ NaN values in predictions for {req.ticker}. Skipping.")
+                raise ValueError("NaN values detected in predictions")
             val_loss = float(np.mean((y_true - preds) ** 2))
             logger.info(f"📈 Prediction completed for {req.ticker}. MSE: {val_loss:.6f}")
+            logger.debug(f"📊 ARIMA predictions preview: {preds[:5]}")
         except Exception as e:
             logger.error(f"❌ Prediction failed for {req.ticker}: {e}")
             raise HTTPException(status_code=500, detail="ARIMA prediction failed")
