@@ -16,7 +16,7 @@ import tempfile
 import os
 from statsmodels.tsa.stattools import adfuller
 
-from models.model_store import store_model_to_s3, load_model_from_s3
+from model_store import store_model_to_s3, load_model_from_s3
 
 logger.info("✅ pmdarima_service.py loaded. NumPy version: %s", np.__version__)
 
