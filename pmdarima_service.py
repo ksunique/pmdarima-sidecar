@@ -76,7 +76,7 @@ def predict_auto_arima(req: ArimaRequest):
         if model is None:
             logger.info(f"🧠 Training new ARIMA model for {req.ticker}")
             with warnings.catch_warnings():
-                warnings.filter_warnings("ignore", category=FutureWarning)
+                warnings.filterwarnings("ignore", category=FutureWarning)
                 model = auto_arima(
                     close_prices,
                     seasonal=True,
