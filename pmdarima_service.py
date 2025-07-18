@@ -53,18 +53,14 @@ def predict_auto_arima(req: ArimaRequest):
     try:
         close_prices = np.asarray(req.close_prices, dtype=np.float64)
         logger.info(f"📊 ARIMA received {len(close_prices)} close prices for {req.ticker}")
-        train = close_prices[:req.actual_seq_length]
         y_true = close_prices[req.actual_seq_length:]
 
-        # Stationarity check on train
-        result = adfuller(train)
-        differenced = False
-        last_value = None
+        # Stationarity check
+        result = adfuller(close_prices)
         if result[1] > 0.05:
             logger.info(f"Non-stationary data detected for {req.ticker}. Applying differencing.")
-            last_value = train[-1]
-            train = np.diff(train)
-            differenced = True
+            close_prices = np.diff(close_prices)
+            y_true = y_true[1:]
 
         model = None
         if req.model_override:
@@ -76,7 +72,7 @@ def predict_auto_arima(req: ArimaRequest):
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=FutureWarning)
                 model = auto_arima(
-                    train,
+                    close_prices,
                     seasonal=True,
                     m=5,
                     stepwise=True,
@@ -89,13 +85,15 @@ def predict_auto_arima(req: ArimaRequest):
 
         try:
             preds = model.predict(n_periods=len(y_true))
-            if differenced:
-                preds = np.cumsum(preds) + last_value
             if len(preds) != len(y_true):
                 logger.warning(f"Prediction length ({len(preds)}) does not match y_true ({len(y_true)}) for {req.ticker}")
                 raise ValueError("Prediction and true value lengths do not match")
+            if np.any(np.isnan(preds)):
+                logger.error(f"❌ NaN values in predictions for {req.ticker}. Skipping.")
+                raise ValueError("NaN values detected in predictions")
             val_loss = float(np.mean((y_true - preds) ** 2))
             logger.info(f"📈 Prediction completed for {req.ticker}. MSE: {val_loss:.6f}")
+            logger.debug(f"📊 ARIMA predictions preview: {preds[:5]}")
         except Exception as e:
             logger.error(f"❌ Prediction failed for {req.ticker}: {e}")
             raise HTTPException(status_code=500, detail="ARIMA prediction failed")
