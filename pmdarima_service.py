@@ -55,12 +55,18 @@ def predict_auto_arima(req: ArimaRequest):
         logger.info(f"📊 ARIMA received {len(close_prices)} close prices for {req.ticker}")
         y_true = close_prices[req.actual_seq_length:]
 
+        # Scale data to improve model fit and reduce MSE scale
+        from sklearn.preprocessing import MinMaxScaler
+        scaler = MinMaxScaler()
+        close_prices_scaled = scaler.fit_transform(close_prices.reshape(-1, 1)).flatten()
+        y_true_scaled = scaler.transform(y_true.reshape(-1, 1)).flatten()
+
         # Stationarity check
-        result = adfuller(close_prices)
+        result = adfuller(close_prices_scaled)
         if result[1] > 0.05:
             logger.info(f"Non-stationary data detected for {req.ticker}. Applying differencing.")
-            close_prices = np.diff(close_prices)
-            y_true = y_true[1:]
+            close_prices_scaled = np.diff(close_prices_scaled)
+            y_true_scaled = y_true_scaled[1:]
 
         model = None
         if req.model_override:
@@ -72,7 +78,7 @@ def predict_auto_arima(req: ArimaRequest):
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=FutureWarning)
                 model = auto_arima(
-                    close_prices,
+                    close_prices_scaled,
                     seasonal=True,
                     m=5,
                     stepwise=True,
@@ -84,16 +90,13 @@ def predict_auto_arima(req: ArimaRequest):
             logger.info(f"📦 Loaded existing ARIMA model for {req.ticker}")
 
         try:
-            preds = model.predict(n_periods=len(y_true))
-            if len(preds) != len(y_true):
-                logger.warning(f"Prediction length ({len(preds)}) does not match y_true ({len(y_true)}) for {req.ticker}")
+            preds_scaled = model.predict(n_periods=len(y_true_scaled))
+            if len(preds_scaled) != len(y_true_scaled):
+                logger.warning(f"Prediction length ({len(preds_scaled)}) does not match y_true ({len(y_true_scaled)}) for {req.ticker}")
                 raise ValueError("Prediction and true value lengths do not match")
-            if np.any(np.isnan(preds)):
-                logger.error(f"❌ NaN values in predictions for {req.ticker}. Skipping.")
-                raise ValueError("NaN values detected in predictions")
+            preds = scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
             val_loss = float(np.mean((y_true - preds) ** 2))
             logger.info(f"📈 Prediction completed for {req.ticker}. MSE: {val_loss:.6f}")
-            logger.debug(f"📊 ARIMA predictions preview: {preds[:5]}")
         except Exception as e:
             logger.error(f"❌ Prediction failed for {req.ticker}: {e}")
             raise HTTPException(status_code=500, detail="ARIMA prediction failed")
