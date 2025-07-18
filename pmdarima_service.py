@@ -4,8 +4,11 @@ import logging
 import warnings
 import sys
 import os
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("arima-sidecar")  # Use consistent logger name
 logging.basicConfig(level=logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s"))
+logger.addHandler(handler)  # Add formatter for consistency
 
 import numpy as np
 from pmdarima import auto_arima
@@ -49,6 +52,7 @@ class ArimaResponse(BaseModel):
 @app.post("/predict_auto_arima", response_model=ArimaResponse)
 def predict_auto_arima(req: ArimaRequest):
     logger.info(f"🚀 Received ARIMA request for {req.ticker} (mode={req.mode}, override={req.model_override})")
+    logger.debug(f"Request details: market={req.market}, bucket={req.bucket_name}, seq_length={req.actual_seq_length}")
 
     try:
         close_prices = np.asarray(req.close_prices, dtype=np.float64)
@@ -58,9 +62,11 @@ def predict_auto_arima(req: ArimaRequest):
         # Stationarity check
         result = adfuller(close_prices)
         if result[1] > 0.05:
-            logger.info(f"Non-stationary data detected for {req.ticker}. Applying differencing.")
+            logger.warning(f"⚠️ Non-stationary data detected for {req.ticker} (p-value={result[1]:.4f}). Applying differencing.")
             close_prices = np.diff(close_prices)
             y_true = y_true[1:]
+        else:
+            logger.info(f"✅ Stationary data confirmed for {req.ticker} (p-value={result[1]:.4f}).")
 
         model = None
         if req.model_override:
@@ -70,7 +76,7 @@ def predict_auto_arima(req: ArimaRequest):
         if model is None:
             logger.info(f"🧠 Training new ARIMA model for {req.ticker}")
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=FutureWarning)
+                warnings.filter_warnings("ignore", category=FutureWarning)
                 model = auto_arima(
                     close_prices,
                     seasonal=True,
@@ -79,23 +85,23 @@ def predict_auto_arima(req: ArimaRequest):
                     suppress_warnings=True,
                     error_action="ignore"
                 )
-            logger.info(f"✅ Successfully trained new ARIMA model for {req.ticker}")
+            logger.info(f"✅ Successfully trained new ARIMA model for {req.ticker}. Model summary: {model.summary()}")
         else:
             logger.info(f"📦 Loaded existing ARIMA model for {req.ticker}")
 
         try:
             preds = model.predict(n_periods=len(y_true))
             if len(preds) != len(y_true):
-                logger.warning(f"Prediction length ({len(preds)}) does not match y_true ({len(y_true)}) for {req.ticker}")
+                logger.error(f"❌ Prediction length mismatch for {req.ticker}: preds={len(preds)}, y_true={len(y_true)}")
                 raise ValueError("Prediction and true value lengths do not match")
             if np.any(np.isnan(preds)):
-                logger.error(f"❌ NaN values in predictions for {req.ticker}. Skipping.")
+                logger.error(f"❌ NaN values in predictions for {req.ticker}. Predictions: {preds}")
                 raise ValueError("NaN values detected in predictions")
             val_loss = float(np.mean((y_true - preds) ** 2))
             logger.info(f"📈 Prediction completed for {req.ticker}. MSE: {val_loss:.6f}")
-            logger.debug(f"📊 ARIMA predictions preview: {preds[:5]}")
+            logger.debug(f"📊 ARIMA predictions preview: {preds[:5]} | True values preview: {y_true[:5]}")
         except Exception as e:
-            logger.error(f"❌ Prediction failed for {req.ticker}: {e}")
+            logger.exception(f"❌ Prediction failed for {req.ticker}: {e}")
             raise HTTPException(status_code=500, detail="ARIMA prediction failed")
 
         if req.mode == "train":
