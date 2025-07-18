@@ -36,10 +36,10 @@ s3 = boto3.client("s3")
 #         return tmp_file.name
 
 def load_model_from_s3(market, ticker, model_type, bucket_name, file_ext="pkl"):
-    key = f"market/{market}/{ticker}/{model_type}.{file_ext}"
+    key = f"{market}/{model_type}/{ticker}.{file_ext}"
     try:
-        s3.download_file(bucket_name, key, "/tmp/model.pkl")
-        with open("/tmp/model.pkl", "rb") as f:
+        s3.download_file(bucket_name, key, f"/tmp/model.{file_ext}")
+        with open(f"/tmp/model.{file_ext}", "rb") as f:
             model = joblib.load(f)
         return model
     except botocore.exceptions.ClientError as e:
@@ -53,7 +53,7 @@ def load_model_from_s3(market, ticker, model_type, bucket_name, file_ext="pkl"):
         return None
 
 def store_model_to_s3(model, market, ticker, model_type, bucket_name, file_ext="pkl"):
-    key = f"models/{market}/{ticker}/{model_type}.{file_ext}"
+    key = f"{market}/{model_type}/{ticker}.{file_ext}"
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_file:
         try:
             joblib.dump(model, tmp_file.name)
