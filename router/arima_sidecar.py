@@ -1,3 +1,5 @@
+#router/arima_sidecar.py
+
 import requests
 import time
 import logging
@@ -7,7 +9,7 @@ from fastapi import APIRouter
 from pmdarima_service import predict_auto_arima
 
 # Configure logging
-logger = logging.getLogger("arima_sidecar")
+logger = logging.getLogger("arima-sidecar")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s"))
@@ -48,6 +50,7 @@ def train_and_predict_arima(
     }
 
     logger.info(f"📨 Starting ARIMA sidecar request for {ticker} | mode={mode} | override={model_override}")
+    logger.debug(f"Payload details: seq_length={actual_seq_length}, market={market}, bucket={bucket_name}")
 
     attempt = 0
     while attempt < retries:
@@ -65,14 +68,18 @@ def train_and_predict_arima(
                 break
 
             logger.info(f"✅ ARIMA sidecar success for {ticker} | val_loss={val_loss:.6f}")
+            logger.debug(f"Predictions preview: {predictions[:5]}")
             return None, predictions, val_loss
 
         except requests.Timeout:
-            logger.warning(f"⏱️ Timeout on attempt {attempt + 1} for {ticker}")
+            logger.warning(f"⏱️ Timeout on attempt {attempt + 1} for {ticker}. Endpoint: {endpoint_url}")
         except requests.RequestException as re:
-            logger.warning(f"⚠️ Request error on attempt {attempt + 1} for {ticker}: {re}")
+            if 'response' in locals():
+                logger.warning(f"⚠️ Request error on attempt {attempt + 1} for {ticker}: {re} | Status: {response.status_code} | Response: {response.text}")
+            else:
+                logger.warning(f"⚠️ Request error on attempt {attempt + 1} for {ticker}: {re}")
         except ValueError as ve:
-            logger.error(f"❌ Response validation error for {ticker}: {ve}")
+            logger.error(f"❌ Response validation error for {ticker}: {ve} | Raw response: {response.text if 'response' in locals() else 'No response'}")
             break
         except Exception as e:
             logger.exception(f"🔥 Unexpected exception during sidecar call for {ticker}: {e}")
